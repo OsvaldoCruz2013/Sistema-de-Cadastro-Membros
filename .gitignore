@@ -1,0 +1,11 @@
+# Ignorar variáveis de ambiente
+.env
+
+# Dependências Node.js
+node_modules/
+
+# Arquivos temporários
+*.log
+*.zip
+.DS_Store
+Thumbs.db
