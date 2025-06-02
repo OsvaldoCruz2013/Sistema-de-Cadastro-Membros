@@ -117,7 +117,7 @@ app.post("/api/membros", async (req, res) => {
 // Rota para Buscar Membros
 app.get("/api/membros", async (req, res) => {
   try {
-    const resultado = await pool.query(`SELECT
+    const resultado = await pool.query(` SELECT
         fm.id_fato,
         fm.nome,
         dg.genero,
@@ -126,13 +126,16 @@ app.get("/api/membros", async (req, res) => {
         fm.endereco,
         fm.numero,
         fm.bairro,
-        fm.cep,
+        fm.cep, -- 'cep' agora é selecionado diretamente de fato_membros (confirmado)
         fm.telefone,
         fm.email,
         fm.observacao,
-        fm.cidade, -- Mantido, pois 'cidade' (varchar) está na fato_membros
+        dcid.nome_cidade AS cidade, -- Pega o nome da cidade da dim_cidade
+        dcid.nome_estado AS estado, -- Pega o nome do estado da dim_cidade
+        dt.data_nascimento,   -- Pega a data de nascimento da dim_tempo
+        dt.data_cadastro,     -- Pega a data de cadastro da dim_tempo
         de.estadocivil,
-        dc.nome_congregacao AS congregacao, -- Alias para 'congregacao'
+        dc.nome_congregacao AS congregacao,
         dca.cargo,
         ds.status
       FROM
@@ -147,6 +150,10 @@ app.get("/api/membros", async (req, res) => {
         dim_cargo dca ON fm.id_cargo = dca.id_cargo
       JOIN
         dim_status ds ON fm.id_status = ds.id_status
+      JOIN
+        dim_cidade dcid ON fm.id_cidade = dcid.id_cidade -- NOVO JOIN para dim_cidade
+      JOIN
+        dim_tempo dt ON fm.id_tempo = dt.id_tempo -- NOVO JOIN para dim_tempo
       ORDER BY fm.id_fato DESC`);
     res.json(resultado.rows);
   } catch (error) {
