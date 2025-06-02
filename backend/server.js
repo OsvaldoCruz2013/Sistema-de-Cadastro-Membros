@@ -4,11 +4,9 @@ const express = require("express");
 const cors = require("cors");
 const { Pool } = require("pg"); // Usa { Pool } para desestruturar
 const bcrypt = require("bcrypt");
-const path = require("path");
+const path = require("path"); // 'path' é importado mas não será usado para servir estáticos
 
 const app = express();
-
-// --- INÍCIO DAS CORREÇÕES ---
 
 // 1. Configura a porta para usar a variável de ambiente do Render (ou 3000 localmente)
 const PORT = process.env.PORT || 3000;
@@ -19,13 +17,9 @@ app.use(cors());
 // Permite que o Express leia JSON do corpo das requisições
 app.use(express.json());
 
-// 2. REMOVIDO: Linha que fazia o backend servir arquivos estáticos do frontend
+// Linhas que faziam o backend servir arquivos estáticos do frontend foram removidas/comentadas
 // app.use(express.static(path.join(__dirname,"../frontend"))); 
-
-// 3. REMOVIDO: Rota que fazia o backend servir a página HTML raiz
 // app.get("/",(req,res)=>{res.sendFile(path.join(__dirname,"../frontend/login.html"))});
-
-// --- FIM DAS CORREÇÕES ---
 
 
 // Configuração do pool de conexão com o PostgreSQL
@@ -47,16 +41,54 @@ const colunasDimensoes = {
   cargo: "cargo",
   estadocivil: "estadocivil",
   congregacao: "nome_congregacao",
-  cidade: "cidade" // Adicionado para buscar ID da cidade (se dim_cidade tem nome_cidade)
-  // Se dim_cidade tem 'cidade' e 'estado' como colunas diretas, use 'cidade: "cidade"'
+  cidade: "cidade", // Assumindo dim_cidade tem coluna 'cidade'
+  tempo: "data_completa" // Assumindo dim_tempo tem coluna 'data_completa'
 };
 
-// Função auxiliar para buscar IDs de dimensão
+// Função auxiliar para buscar IDs de dimensão (e inserir se não existir para cidade/tempo)
 const getId = async (dimensao, valor) => {
   const colunaBusca = colunasDimensoes[dimensao];
   if (!colunaBusca) {
     throw new Error(`Coluna de busca não definida para ${dimensao}`);
   }
+
+  // Lógica específica para buscar id_cidade usando cidade e estado
+  if (dimensao === "cidade") {
+      // 'valor' aqui é um objeto { cidade: "...", estado: "..." }
+      const resultado = await pool.query(
+          `SELECT id_cidade FROM dim_cidade WHERE LOWER(cidade) = LOWER($1) AND LOWER(estado) = LOWER($2)`,
+          [valor.cidade, valor.estado]
+      );
+      if (resultado.rows.length === 0) {
+          // Se a cidade não existe, insere e retorna o novo ID
+          const insertResult = await pool.query(
+              `INSERT INTO dim_cidade (cidade, estado) VALUES ($1, $2) RETURNING id_cidade`,
+              [valor.cidade, valor.estado]
+          );
+          return insertResult.rows[0].id_cidade;
+      }
+      return resultado.rows[0].id_cidade;
+  }
+  
+  // Lógica específica para buscar id_tempo usando a data
+  if (dimensao === "tempo") {
+      // 'valor' aqui é a string da data (ex: 'YYYY-MM-DD')
+      const resultado = await pool.query(
+          `SELECT id_tempo FROM dim_tempo WHERE data_completa = $1`, 
+          [valor] 
+      );
+      if (resultado.rows.length === 0) {
+          // Se a data não existe na dim_tempo, insere e retorna o novo ID
+          const insertResult = await pool.query(
+              `INSERT INTO dim_tempo (data_completa) VALUES ($1) RETURNING id_tempo`,
+              [valor]
+          );
+          return insertResult.rows[0].id_tempo;
+      }
+      return resultado.rows[0].id_tempo;
+  }
+
+  // Lógica geral para outras dimensões (genero, status, cargo, estadocivil, congregacao)
   const resultado = await pool.query(
     `SELECT id_${dimensao} FROM dim_${dimensao} WHERE LOWER(${colunaBusca}) = LOWER($1)`,
     [valor]
@@ -72,13 +104,9 @@ app.post("/api/login", async (req, res) => {
   const { usuario, senha } = req.body;
   try {
     const resultado = await pool.query("SELECT * FROM usuarios WHERE usuario = $1", [usuario]);
-    if (resultado.rows.length === 0) {
-      return res.status(401).send("Usuário não encontrado");
-    }
+    if (resultado.rows.length === 0) { return res.status(401).send("Usuário não encontrado"); }
     const usuarioBanco = resultado.rows[0];
-    if (!await bcrypt.compare(senha, usuarioBanco.senha)) {
-      return res.status(401).send("Senha incorreta");
-    }
+    if (!await bcrypt.compare(senha, usuarioBanco.senha)) { return res.status(401).send("Senha incorreta"); }
     res.send({ mensagem: "Login bem-sucedido" });
   } catch (error) {
     console.error("Erro durante login:", error);
@@ -86,44 +114,58 @@ app.post("/api/login", async (req, res) => {
   }
 });
 
-// Rota para Salvar Membros
+// Rota para Salvar Membros (AJUSTADA PARA INSERIR TODOS OS CAMPOS CORRETAMENTE)
 app.post("/api/membros", async (req, res) => {
   const membro = req.body;
   try {
+    // Obter IDs para dimensões
     const idGenero = await getId("genero", membro.genero);
     const idStatus = await getId("status", membro.status);
     const idCargo = await getId("cargo", membro.cargo);
     const idEstadoCivil = await getId("estadocivil", membro.estadocivil);
     const idCongregacao = await getId("congregacao", membro.congregacao);
-    // NOVO: Obter id_cidade
-    const idCidade = await getId("cidade", {nome_cidade: membro.cidade, nome_estado: membro.estado}); // Passa objeto para lookup
     
-    // NOVO: Obter id_tempo para data_cadastro (ou data_nascimento se for relevante)
-    // ATENÇÃO: Você precisa ter uma forma de obter o id_tempo.
-    // Se dim_tempo tem uma coluna 'data_completa' e você quer o ID da data de cadastro:
-    // const idTempoCadastro = await getId("tempo", membro.data_cadastro);
-    // Se id_tempo é apenas uma FK e não vem de dim_tempo para datas, pode ser NULL ou um valor padrão.
-    // Por enquanto, vamos assumir que id_tempo é para a data de cadastro (hoje)
-    // E que dim_tempo tem uma entrada para a data atual.
-    // Se não, você pode precisar de um ID padrão ou NULL se a coluna for nula.
-    // Para simplificar, vamos usar um valor padrão ou NULL se não for obrigatório.
-    // Se id_tempo for obrigatório e você não tiver um valor, o INSERT falhará.
-    const idTempo = membro.id_tempo || null; // Assumindo que id_tempo pode vir do frontend ou ser null
+    // Obter id_cidade (passando cidade e estado para a função getId)
+    const idCidade = await getId("cidade", {cidade: membro.cidade, estado: membro.estado}); 
+    
+    // Obter id_tempo para data_nascimento e data_cadastro
+    // A função getId para 'tempo' irá inserir a data se ela não existir
+    const idTempoNascimento = await getId("tempo", membro.data_nascimento); 
+    const idTempoCadastro = await getId("tempo", membro.data_cadastro); 
 
     const queryTexto = `
       INSERT INTO fato_membros 
       (nome, cpf, rg, endereco, numero, bairro, telefone, email, observacao,
-       id_genero, id_status, id_cargo, id_estadocivil, id_congregacao)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+       id_genero, id_status, id_cargo, id_estadocivil, id_congregacao, 
+       id_cidade, id_tempo, -- id_tempo será usado para data_cadastro (ou a principal data)
+       cep, data_nascimento, data_cadastro, cidade) 
+       -- ^^^ Estas colunas devem corresponder EXATAMENTE às colunas na sua tabela fato_membros
+       -- 'estado' não está aqui, pois assumimos que vem de dim_cidade e não é coluna direta em fato_membros
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+      -- Total 20 parâmetros (contando os $1 a $20)
     `;
+    // ATENÇÃO: A ORDEM DOS VALORES ABAIXO DEVE CORRESPONDER EXATAMENTE À ORDEM DAS COLUNAS ACIMA.
     const valores = [
-      membro.nome, membro.cpf, membro.rg, membro.endereco, membro.numero,
-      membro.bairro, membro.telefone, membro.email, membro.observacao,
-      idGenero, idStatus, idCargo, idEstadoCivil, idCongregacao,
-       idCidade, // Valor para id_cidade,
-      idTempo, // Valor para id_tempo (ajuste conforme sua lógica)
-      membro.data_nascimento, // Valor para data_nascimento
-      membro.data_cadastro // Valor para data_cadastro
+      membro.nome, 
+      membro.cpf, 
+      membro.rg, 
+      membro.endereco, 
+      membro.numero,
+      membro.bairro, 
+      membro.telefone, 
+      membro.email, 
+      membro.observacao,
+      idGenero,       // $10
+      idStatus,       // $11
+      idCargo,        // $12
+      idEstadoCivil,  // $13
+      idCongregacao,  // $14
+      idCidade,       // $15 (FK para dim_cidade)
+      idTempoCadastro, // $16 (FK para dim_tempo, usando data_cadastro como lookup)
+      membro.cep,             // $17 (Coluna direta)
+      membro.data_nascimento, // $18 (Coluna direta)
+      membro.data_cadastro,   // $19 (Coluna direta)
+      membro.cidade           // $20 (Coluna direta)
     ];
 
     await pool.query(queryTexto, valores);
@@ -134,10 +176,11 @@ app.post("/api/membros", async (req, res) => {
   }
 });
 
-// Rota para Buscar Membros
+// Rota para Buscar Membros (AJUSTADA: Inclui data_nascimento, data_cadastro e usa dim_cidade)
 app.get("/api/membros", async (req, res) => {
   try {
-    const resultado = await pool.query(`SELECT
+    const resultado = await pool.query(`
+      SELECT
         fm.id_fato,
         fm.nome,
         dg.genero,
@@ -146,14 +189,14 @@ app.get("/api/membros", async (req, res) => {
         fm.endereco,
         fm.numero,
         fm.bairro,
-        fm.cep, -- 'cep' é selecionado diretamente de fato_membros
+        fm.cep, 
         fm.telefone,
         fm.email,
         fm.observacao,
-        dcid.cidade AS cidade, -- Pega o nome da cidade da dim_cidade
-        dcid.estado AS estado, -- Pega o nome do estado da dim_cidade
-        fm.data_nascimento,   -- Pega a data de nascimento DIRETAMENTE de fato_membros
-        fm.data_cadastro,     -- Pega a data de cadastro DIRETAMENTE de fato_membros
+        dcid.cidade AS cidade, 
+        dcid.estado AS estado, 
+        fm.data_nascimento,   
+        fm.data_cadastro,     
         de.estadocivil,
         dc.nome_congregacao AS congregacao,
         dca.cargo,
@@ -172,8 +215,9 @@ app.get("/api/membros", async (req, res) => {
         dim_status ds ON fm.id_status = ds.id_status
       JOIN
         dim_cidade dcid ON fm.id_cidade = dcid.id_cidade 
-      -- JOIN dim_tempo dt ON fm.id_tempo = dt.id_tempo -- REMOVIDO: se datas não vêm de dim_tempo
-      ORDER BY fm.id_fato DESC`);
+      -- JOIN dim_tempo dt ON fm.id_tempo = dt.id_tempo -- Removido, pois datas vêm diretamente de fato_membros
+      ORDER BY fm.id_fato DESC
+    `);
     res.json(resultado.rows);
   } catch (error) {
     console.error("Erro ao buscar membros:", error);
@@ -183,4 +227,5 @@ app.get("/api/membros", async (req, res) => {
 
 // Inicia o servidor na porta definida pela variável de ambiente
 app.listen(PORT, () => {
-  console.log(`Servidor rodando em http://localhost:${PORT}`);});
+  console.log(`Servidor rodando em http://localhost:${PORT}`);
+});
