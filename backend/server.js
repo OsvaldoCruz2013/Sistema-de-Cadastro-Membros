@@ -130,8 +130,8 @@ app.get("/api/membros", async (req, res) => {
         fm.telefone,
         fm.email,
         fm.observacao,
-        dcid.nome_cidade AS cidade, -- Pega o nome da cidade da dim_cidade
-        dcid.nome_estado AS estado, -- Pega o nome do estado da dim_cidade
+        dcid.cidade AS cidade, -- Pega o nome da cidade da dim_cidade
+        dcid.estado AS estado, -- Pega o nome do estado da dim_cidade
         dt.data_nascimento,   -- Pega a data de nascimento da dim_tempo
         dt.data_cadastro,     -- Pega a data de cadastro da dim_tempo
         de.estadocivil,
