@@ -1,14 +1,1 @@
-
-document.getElementById('loginForm').addEventListener('submit', function(e) {
-  e.preventDefault();
-  const usuario = document.getElementById('usuario').value;
-  const senha = document.getElementById('senha').value;
-
-  // Aqui é apenas um exemplo. Em produção, nunca exponha senhas assim.
-  if (usuario === "admin" && senha === "654321") {
-    localStorage.setItem("logado", "true");
-    window.location.href = "cadastro.html";
-  } else {
-    document.getElementById('erroLogin').textContent = "Usuário ou senha inválidos.";
-  }
-});
+document.getElementById("loginForm").addEventListener("submit",async function(e){e.preventDefault();const t=document.getElementById("usuario").value,o=document.getElementById("senha").value;try{const e=await fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({usuario:t,senha:o})});if(e.ok)localStorage.setItem("logado","true"),window.location.href="cadastro.html";else{const t=await e.text();document.getElementById("erroLogin").textContent=t||"Usuário ou senha inválidos."}}catch(e){document.getElementById("erroLogin").textContent="Erro ao conectar com o servidor.",console.error(e)}});
