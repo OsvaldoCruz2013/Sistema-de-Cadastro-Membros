@@ -1,4 +1,4 @@
-
+const API_BASE_URL = 'https://sistema-cadastro-backend-api.onrender.com'; // <-- Sua URL do backend no Render
 document.getElementById('loginForm').addEventListener('submit', function(e) {
   e.preventDefault();
   const usuario = document.getElementById('usuario').value;
