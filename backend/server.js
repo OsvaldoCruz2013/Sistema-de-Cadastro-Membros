@@ -114,7 +114,7 @@ app.post("/api/login", async (req, res) => {
   }
 });
 
-// Rota para Salvar Membros (AJUSTADA PARA INSERIR TODOS OS CAMPOS CORRETAMENTE)
+// Rota para Salvar Membros (POST - Criar)
 app.post("/api/membros", async (req, res) => {
   const membro = req.body;
   try {
@@ -128,8 +128,7 @@ app.post("/api/membros", async (req, res) => {
     // Obter id_cidade (passando cidade e estado para a função getId)
     const idCidade = await getId("cidade", {cidade: membro.cidade, estado: membro.estado}); 
     
-    // Obter id_tempo para data_nascimento e data_cadastro
-    // A função getId para 'tempo' irá inserir a data se ela não existir
+    // Obter id_tempo para data_cadastro (ou data_nascimento se for relevante)
     const idTempoNascimento = await getId("tempo", membro.data_nascimento); 
     const idTempoCadastro = await getId("tempo", membro.data_cadastro); 
 
@@ -140,7 +139,6 @@ app.post("/api/membros", async (req, res) => {
        id_cidade, id_tempo, -- id_tempo será usado para data_cadastro (ou a principal data)
        cep, data_nascimento, data_cadastro, cidade) 
        -- ^^^ Estas colunas devem corresponder EXATAMENTE às colunas na sua tabela fato_membros
-       -- 'estado' não está aqui, pois assumimos que vem de dim_cidade e não é coluna direta em fato_membros
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
       -- Total 20 parâmetros (contando os $1 a $20)
     `;
@@ -176,7 +174,7 @@ app.post("/api/membros", async (req, res) => {
   }
 });
 
-// Rota para Buscar Membros (AJUSTADA: Inclui data_nascimento, data_cadastro e usa dim_cidade)
+// Rota para Buscar Membros (GET - Ler)
 app.get("/api/membros", async (req, res) => {
   try {
     const resultado = await pool.query(`
@@ -224,6 +222,110 @@ app.get("/api/membros", async (req, res) => {
     res.status(500).send("Erro ao buscar membros");
   }
 });
+
+// --- INÍCIO DA NOVA ROTA PUT ---
+// Rota para Atualizar Membros (PUT - Atualizar)
+app.put("/api/membros/:id", async (req, res) => {
+  const idMembro = req.params.id; // Pega o ID do membro da URL
+  const membro = req.body; // Pega os dados atualizados do corpo da requisição
+
+  try {
+    // Obter IDs para dimensões (necessário para o UPDATE se os nomes mudaram)
+    const idGenero = await getId("genero", membro.genero);
+    const idStatus = await getId("status", membro.status);
+    const idCargo = await getId("cargo", membro.cargo);
+    const idEstadoCivil = await getId("estadocivil", membro.estadocivil);
+    const idCongregacao = await getId("congregacao", membro.congregacao);
+    
+    // Obter id_cidade (passando cidade e estado para a função getId)
+    const idCidade = await getId("cidade", {cidade: membro.cidade, estado: membro.estado}); 
+    
+    // Obter id_tempo para data_cadastro (ou data_nascimento se for relevante)
+    const idTempoNascimento = await getId("tempo", membro.data_nascimento); 
+    const idTempoCadastro = await getId("tempo", membro.data_cadastro); 
+
+    const queryTexto = `
+      UPDATE fato_membros
+      SET 
+        nome = $1, 
+        cpf = $2, 
+        rg = $3, 
+        endereco = $4, 
+        numero = $5, 
+        bairro = $6, 
+        telefone = $7, 
+        email = $8, 
+        observacao = $9,
+        id_genero = $10, 
+        id_status = $11, 
+        id_cargo = $12, 
+        id_estadocivil = $13, 
+        id_congregacao = $14,
+        id_cidade = $15, 
+        id_tempo = $16, 
+        cep = $17, 
+        data_nascimento = $18, 
+        data_cadastro = $19, 
+        cidade = $20
+      WHERE id_fato = $21
+    `;
+    // ATENÇÃO: A ORDEM DOS VALORES ABAIXO DEVE CORRESPONDER EXATAMENTE À ORDEM DAS COLUNAS ACIMA.
+    const valores = [
+      membro.nome, 
+      membro.cpf, 
+      membro.rg, 
+      membro.endereco, 
+      membro.numero,
+      membro.bairro, 
+      membro.telefone, 
+      membro.email, 
+      membro.observacao,
+      idGenero,       // $10
+      idStatus,       // $11
+      idCargo,        // $12
+      idEstadoCivil,  // $13
+      idCongregacao,  // $14
+      idCidade,       // $15
+      idTempoCadastro, // $16 (usando data_cadastro como lookup para id_tempo)
+      membro.cep,             // $17
+      membro.data_nascimento, // $18
+      membro.data_cadastro,   // $19
+      membro.cidade,          // $20
+      idMembro                // $21 - O ID para a cláusula WHERE
+    ];
+
+    const resultado = await pool.query(queryTexto, valores);
+
+    if (resultado.rowCount > 0) {
+      res.send("Membro atualizado com sucesso!");
+    } else {
+      res.status(404).send("Membro não encontrado para atualização.");
+    }
+  } catch (error) {
+    console.error("Erro detalhado ao atualizar membro:", error);
+    res.status(500).send("Erro ao atualizar membro");
+  }
+});
+// --- FIM DA NOVA ROTA PUT ---
+
+// Rota para Excluir Membros (DELETE)
+app.delete("/api/membros/:id", async (req, res) => {
+  const idMembro = req.params.id; // Pega o ID do membro da URL
+  try {
+    const queryTexto = `DELETE FROM fato_membros WHERE id_fato = $1`;
+    const resultado = await pool.query(queryTexto, [idMembro]);
+
+    if (resultado.rowCount > 0) {
+      res.send("Membro excluído com sucesso!");
+    } else {
+      res.status(404).send("Membro não encontrado para exclusão.");
+    }
+  } catch (error) {
+    console.error("Erro ao excluir membro:", error);
+    res.status(500).send("Erro ao excluir membro");
+  }
+});
+
 
 // Inicia o servidor na porta definida pela variável de ambiente
 app.listen(PORT, () => {
